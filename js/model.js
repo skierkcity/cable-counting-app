@@ -4,6 +4,9 @@ export const SCHEMA_VERSION = 1;
 export const MAX_ROWS = 999;
 export const MAX_NAME = 60;
 
+/** Chart colours, named after natural dyes. Each chart gets one so it can be found at a glance. */
+export const CHART_COLORS = ['madder', 'indigo', 'weld', 'sage', 'heather', 'teal', 'walnut', 'rose'];
+
 export function uid() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -36,20 +39,27 @@ export function createProject(name) {
 }
 
 export function createPart(name) {
-  return { id: uid(), name: cleanName(name, 'Part'), rowsKnitted: 0, charts: [] };
+  return { id: uid(), name: cleanName(name, 'Part'), rowsKnitted: 0, lastUsedAt: 0, charts: [] };
+}
+
+/** The first colour not already used in the part (cycling once all are taken). */
+export function nextChartColor(part) {
+  const used = new Set(part.charts.map((c) => c.color));
+  return CHART_COLORS.find((c) => !used.has(c)) ?? CHART_COLORS[part.charts.length % CHART_COLORS.length];
 }
 
 /**
  * A chart repeats every `rows` rows. `startRow` is the chart row worked on the part's
  * first row (for staggered charts). `nudge` is any manual per-chart adjustment.
  */
-export function createChart({ label, rows = 8, startRow = 1 } = {}) {
+export function createChart({ label, rows = 8, startRow = 1, color = CHART_COLORS[0] } = {}) {
   const r = clampInt(rows, 1, MAX_ROWS, 8);
   return {
     id: uid(),
     label: cleanName(label, 'Chart'),
     rows: r,
     startRow: clampInt(startRow, 1, r, 1),
+    color: CHART_COLORS.includes(color) ? color : CHART_COLORS[0],
     nudge: 0,
   };
 }
@@ -108,6 +118,7 @@ export function duplicatePart(part, name) {
     id: uid(),
     name: cleanName(name, part.name + ' (copy)'),
     rowsKnitted: 0,
+    lastUsedAt: 0,
     charts: part.charts.map((c) => ({ ...c, id: uid(), nudge: 0 })),
   };
 }
@@ -117,7 +128,21 @@ export function updateChart(chart, changes) {
   const rows = 'rows' in changes ? clampInt(changes.rows, 1, MAX_ROWS, chart.rows) : chart.rows;
   const startRow = clampInt('startRow' in changes ? changes.startRow : chart.startRow, 1, rows, 1);
   const label = 'label' in changes ? cleanName(changes.label, chart.label) : chart.label;
-  return { ...chart, label, rows, startRow };
+  const color = CHART_COLORS.includes(changes.color) ? changes.color : chart.color;
+  return { ...chart, label, rows, startRow, color };
+}
+
+/** The part most recently counted or opened, across all projects (or null). */
+export function mostRecentPart(state) {
+  let best = null;
+  for (const project of state.projects) {
+    for (const part of project.parts) {
+      if (part.lastUsedAt > 0 && part.charts.length && (!best || part.lastUsedAt > best.part.lastUsedAt)) {
+        best = { project, part };
+      }
+    }
+  }
+  return best;
 }
 
 /**
@@ -153,7 +178,8 @@ export function normaliseState(data) {
           id: freshId(part.id),
           name: cleanName(part.name, 'Part'),
           rowsKnitted: clampInt(part.rowsKnitted, 0, Number.MAX_SAFE_INTEGER, 0),
-          charts: charts.map((c) => {
+          lastUsedAt: Number.isFinite(part.lastUsedAt) && part.lastUsedAt > 0 ? part.lastUsedAt : 0,
+          charts: charts.map((c, i) => {
             if (!c || typeof c !== 'object') throw new Error('A chart in this file is damaged.');
             const rows = clampInt(c.rows, 1, MAX_ROWS, 8);
             return {
@@ -161,6 +187,7 @@ export function normaliseState(data) {
               label: cleanName(c.label, 'Chart'),
               rows,
               startRow: clampInt(c.startRow, 1, rows, 1),
+              color: CHART_COLORS.includes(c.color) ? c.color : CHART_COLORS[i % CHART_COLORS.length],
               nudge: clampInt(c.nudge, -1e9, 1e9, 0),
             };
           }),
