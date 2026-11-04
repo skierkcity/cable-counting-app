@@ -1,6 +1,6 @@
 // Offline support: serve the app from cache, refresh the cache in the background.
 // Bump VERSION whenever app files change so phones pick up the new version.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `cable-counter-${VERSION}`;
 const ASSETS = [
   './',
@@ -10,6 +10,8 @@ const ASSETS = [
   './js/model.js',
   './js/storage.js',
   './js/device.js',
+  './fonts/fraunces.woff2',
+  './fonts/figtree.woff2',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',

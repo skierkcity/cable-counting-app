@@ -12,6 +12,9 @@ import {
   wrappedCharts,
   normaliseState,
   emptyState,
+  nextChartColor,
+  mostRecentPart,
+  CHART_COLORS,
 } from '../js/model.js';
 
 function partWith(...charts) {
@@ -113,10 +116,11 @@ test('duplicate copies the charts with new ids and fresh counts', () => {
   assert.equal(copy.name, 'Right sleeve');
   assert.equal(copy.rowsKnitted, 0);
   assert.notEqual(copy.id, part.id);
-  assert.deepEqual(copy.charts.map((c) => [c.label, c.rows, c.startRow, c.nudge]), [
-    ['A', 4, 1, 0],
-    ['B', 6, 2, 0],
+  assert.deepEqual(copy.charts.map((c) => [c.label, c.rows, c.startRow, c.nudge, c.color]), [
+    ['A', 4, 1, 0, part.charts[0].color],
+    ['B', 6, 2, 0, part.charts[1].color],
   ]);
+  assert.equal(copy.lastUsedAt, 0);
   assert.ok(copy.charts.every((c, i) => c.id !== part.charts[i].id));
 });
 
@@ -153,5 +157,43 @@ test('normaliseState repairs bad values', () => {
   assert.equal(chart.rows, 999);
   assert.equal(chart.startRow, 1);
   assert.equal(chart.label, 'Chart');
+  assert.equal(chart.color, CHART_COLORS[0]);
   assert.ok(chart.id);
+});
+
+test('older backups without colours get a distinct colour per chart', () => {
+  const s = normaliseState({
+    projects: [{ name: 'Old', parts: [{ name: 'Back', charts: [{ rows: 4 }, { rows: 6 }, { rows: 8, color: 'teal' }] }] }],
+  });
+  assert.deepEqual(s.projects[0].parts[0].charts.map((c) => c.color), [CHART_COLORS[0], CHART_COLORS[1], 'teal']);
+  assert.equal(s.projects[0].parts[0].lastUsedAt, 0);
+});
+
+test('new charts get the first unused colour', () => {
+  const part = partWith({ label: 'A', color: CHART_COLORS[0] }, { label: 'B', color: CHART_COLORS[2] });
+  assert.equal(nextChartColor(part), CHART_COLORS[1]);
+  const full = { ...part, charts: CHART_COLORS.map((color) => createChart({ color })) };
+  assert.equal(nextChartColor(full), CHART_COLORS[0]);
+});
+
+test('updateChart only accepts known colours', () => {
+  const chart = createChart({ label: 'A', color: 'indigo' });
+  assert.equal(updateChart(chart, { color: 'sage' }).color, 'sage');
+  assert.equal(updateChart(chart, { color: 'neon' }).color, 'indigo');
+  assert.equal(updateChart(chart, { rows: 4 }).color, 'indigo');
+});
+
+test('mostRecentPart finds the last part used across projects', () => {
+  const mk = (name, lastUsedAt, charts = 1) => ({
+    ...createPart(name),
+    lastUsedAt,
+    charts: Array.from({ length: charts }, () => createChart()),
+  });
+  const state = emptyState();
+  assert.equal(mostRecentPart(state), null);
+  state.projects.push({ id: 'a', name: 'A', parts: [mk('Back', 100), mk('Front', 0)] });
+  state.projects.push({ id: 'b', name: 'B', parts: [mk('Sleeve', 300), mk('Empty', 500, 0)] });
+  const recent = mostRecentPart(state);
+  assert.equal(recent.part.name, 'Sleeve');
+  assert.equal(recent.project.id, 'b');
 });
